@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "malf-data"
+version = "0.1.0"
+description = "Deterministic, read-only TDX ingest and DuckDB snapshot storage for AI MALF RiskBench."
+requires-python = ">=3.10"
+dependencies = [
+    "duckdb>=0.9.0",
+    "riskbench-shared @ file:///Z:/ai-malf-riskbench-components/riskbench-shared",
+    "malf-engine @ file:///Z:/ai-malf-riskbench-components/malf-engine",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
