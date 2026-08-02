@@ -6,6 +6,8 @@ from malf.types import (
     Direction,
     PriceBar,
     RangeResolutionType,
+    RangeState,
+    RangeSnapshot,
     WaveLifespan,
     WaveStructuralSnapshot,
 )
@@ -94,6 +96,25 @@ class _SyntheticWaveAndRangeFacts(_SyntheticFacts):
             boundary_low_now=880,
             resolution_type="up",
             confirmation_pivot_extreme_price=1145,
+        )
+
+    def active_range(self, bar: PriceBar, core: object) -> RangeSnapshot:
+        return RangeSnapshot(
+            symbol=bar.symbol,
+            timeframe=bar.timeframe,
+            bar_dt=bar.bar_dt,
+            range_id="active-range",
+            range_state=RangeState.ALIVE,
+            birth_bar_dt="20980102",
+            boundary_init_high=1100,
+            boundary_init_low=900,
+            boundary_now_high=1120,
+            boundary_now_low=880,
+            break_direction=Direction.UP,
+            old_wave_direction=Direction.UP,
+            range_rule_version="range-v0.0.1",
+            schema_version="malf-range-snapshot-v0",
+            evolution_count=4,
         )
 
 
@@ -197,6 +218,47 @@ def test_driver_calls_range_lifespan_and_rank_when_public_facts_are_supplied() -
         "service.build_wave_structural_snapshot",
     ]
     assert snapshot.range_span_rank is not None
+    assert snapshot.range_boundary_high_now == 1120
+    assert snapshot.range_boundary_low_now == 880
     assert snapshot.range_evolution_rank is not None
     assert snapshot.range_replacement_rank is not None
     assert snapshot.range_resolution_distance_rank is not None
+    assert len(driver.lifespan_engine.get_resolved_ranges()) == 31
+
+
+class _SequencedWaveFacts(_SyntheticFacts):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def wave_facts(self, bar: PriceBar, core: object) -> WaveLifecycleFacts:
+        self.calls += 1
+        current = _facts()
+        if self.calls == 1:
+            return WaveLifecycleFacts(**{**current.__dict__, "current_wave_is_alive": False})
+        return WaveLifecycleFacts(**{**current.__dict__, "wave_id": "next-wave"})
+
+
+def test_driver_records_terminated_lifespans_for_future_rank_peers() -> None:
+    """A completed lifespan enters the public history only after its Service view."""
+    facts = _SequencedWaveFacts()
+    driver = MALFDriver(lifecycle_facts=facts, data_stale=True)
+    _seed_history(driver)
+
+    first = driver.on_bar(_bar())
+    second = driver.on_bar(
+        PriceBar(
+            symbol="sh999999",
+            timeframe="day",
+            bar_dt="20990102",
+            open=1001,
+            high=1011,
+            low=991,
+            close=1006,
+        )
+    )
+
+    assert first.wave_span_rank is not None
+    assert len(driver.lifespan_engine.get_terminated_waves()) == 61
+    assert second.wave_span_rank is not None
+    assert second.p2_same_dir_span_momentum is not None
+

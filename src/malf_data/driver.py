@@ -22,6 +22,7 @@ from malf.types import (
     PriceBar,
     RangeLifespan,
     RangeResolutionType,
+    RangeSnapshot,
     WaveLifespan,
     WaveStructuralSnapshot,
 )
@@ -68,6 +69,7 @@ class RangeLifecycleFacts:
     boundary_low_now: int
     resolution_type: str
     confirmation_pivot_extreme_price: int
+    record_resolved: bool = True
 
 
 class LifecycleFactsProvider(Protocol):
@@ -83,6 +85,11 @@ class LifecycleFactsProvider(Protocol):
     ) -> RangeLifecycleFacts | None:
         """Return complete resolved-range facts for this bar, or None when unavailable."""
 
+    def active_range(
+        self, bar: PriceBar, core: CoreStateSnapshot
+    ) -> RangeSnapshot | None:
+        """Return a public active-range snapshot when one is available."""
+
 
 class PublicCoreOnlyLifecycleFacts:
     """Production-safe default: do not infer unavailable lifecycle facts."""
@@ -95,6 +102,11 @@ class PublicCoreOnlyLifecycleFacts:
     def range_facts(
         self, bar: PriceBar, core: CoreStateSnapshot
     ) -> RangeLifecycleFacts | None:
+        return None
+
+    def active_range(
+        self, bar: PriceBar, core: CoreStateSnapshot
+    ) -> RangeSnapshot | None:
         return None
 
 
@@ -123,7 +135,12 @@ class MALFDriver:
         core = self.core_engine.on_bar(bar)
         rule_versions = _rule_versions(core)
 
-        active_range = None
+        active_range_provider = getattr(self.lifecycle_facts, "active_range", None)
+        active_range = (
+            active_range_provider(bar, core)
+            if callable(active_range_provider)
+            else None
+        )
         wave_facts = self.lifecycle_facts.wave_facts(bar, core)
         range_facts = self.lifecycle_facts.range_facts(bar, core)
         wave_lifespan = self._build_wave_lifespan(bar, wave_facts)
@@ -186,7 +203,7 @@ class MALFDriver:
             )
 
         self._event("service.build_wave_structural_snapshot")
-        return build_wave_structural_snapshot(
+        snapshot = build_wave_structural_snapshot(
             symbol=bar.symbol,
             timeframe=bar.timeframe,
             bar_dt=bar.bar_dt,
@@ -206,6 +223,21 @@ class MALFDriver:
             data_stale=self.data_stale,
             operational_enabled=False,
         )
+
+        # Record only after the current Service snapshot has been assembled.
+        # This keeps the current wave/range out of its own peer sample while
+        # making completed public facts available to the next bar.
+        if wave_lifespan is not None and wave_facts is not None:
+            if not wave_facts.current_wave_is_alive:
+                self.lifespan_engine.record_terminated_wave(wave_lifespan)
+        if (
+            range_lifespan is not None
+            and range_facts is not None
+            and range_facts.record_resolved
+        ):
+            self.lifespan_engine.record_resolved_range(range_lifespan)
+
+        return snapshot
 
     def _build_range_lifespan(
         self, bar: PriceBar, facts: RangeLifecycleFacts | None
