@@ -14,11 +14,13 @@ from malf.types import (
     WaveStructuralSnapshot,
 )
 
+import malf
+
 from malf_data.driver import MALFDriver, RangeLifecycleFacts, WaveLifecycleFacts
 
 
 _MALF_ENGINE_FIXTURES = (
-    Path(__file__).resolve().parents[2] / "malf-engine" / "tests" / "fixtures"
+    Path(malf.__file__).resolve().parents[2] / "tests" / "fixtures"
 )
 
 

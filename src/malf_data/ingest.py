@@ -12,7 +12,11 @@ from malf.types import PriceBar, WaveStructuralSnapshot
 
 from malf_data.adapters.duckdb_adapter import DuckDBAdapter
 from malf_data.adapters.tdx_reader import read_tdx_day
+from malf_data.aggregate import aggregate_to_month, aggregate_to_week
 from malf_data.driver import ADAPTER_VERSION, MALFDriver
+
+
+_SUPPORTED_TIMEFRAMES: tuple[str, ...] = ("day", "week", "month")
 
 
 @dataclass(frozen=True)
@@ -56,26 +60,21 @@ def calculate_lineage_hash(snapshots: Iterable[WaveStructuralSnapshot]) -> str:
     return digest.hexdigest()
 
 
-def ingest_symbol(
+def ingest_bars(
     symbol: str,
     *,
-    timeframe: str = "day",
-    tdx_root: Path,
+    timeframe: str,
+    bars: Iterable[PriceBar],
     db_path: Path,
     malf_k: int = 2,
     data_stale: bool = True,
 ) -> IngestResult:
-    """Read one authoritative TDX symbol and resume durable snapshot writes.
+    """Run the deterministic MALF driver over prepared bars and resume durable writes.
 
     The complete input prefix is replayed through Core on every run so a resumed
     run preserves stateful engine semantics; only already committed bars are
-    excluded from DuckDB writes.
+    excluded from DuckDB writes (partitioned by symbol + timeframe).
     """
-    if timeframe != "day":
-        raise ValueError("T02 currently supports only the day timeframe")
-
-    file_path = tdx_root / "vipdoc" / symbol[:2] / "lday" / f"{symbol}.day"
-    bars = read_tdx_day(file_path)
     snapshots = build_snapshots(bars, malf_k=malf_k, data_stale=data_stale)
 
     inserted_rows = 0
@@ -92,4 +91,39 @@ def ingest_symbol(
         timeframe=timeframe,
         inserted_rows=inserted_rows,
         lineage_hash=snapshots[0].lineage_hash if snapshots else calculate_lineage_hash([]),
+    )
+
+
+def ingest_symbol(
+    symbol: str,
+    *,
+    timeframe: str = "day",
+    tdx_root: Path,
+    db_path: Path,
+    malf_k: int = 2,
+    data_stale: bool = True,
+) -> IngestResult:
+    """Read one authoritative TDX symbol and resume durable snapshot writes.
+
+    week/month 输入来自 `aggregate.py` 的 day 聚合产物（trd.md §5.4.3 口径）；
+    日/周/月各自独立跑 MALF（不混池 rank），快照以 timeframe 字段区分。
+    """
+    if timeframe not in _SUPPORTED_TIMEFRAMES:
+        raise ValueError("timeframe must be one of 'day', 'week', 'month'")
+
+    file_path = tdx_root / "vipdoc" / symbol[:2] / "lday" / f"{symbol}.day"
+    daily = read_tdx_day(file_path)
+    if timeframe == "week":
+        bars = aggregate_to_week(daily)
+    elif timeframe == "month":
+        bars = aggregate_to_month(daily)
+    else:
+        bars = daily
+    return ingest_bars(
+        symbol,
+        timeframe=timeframe,
+        bars=bars,
+        db_path=db_path,
+        malf_k=malf_k,
+        data_stale=data_stale,
     )
