@@ -111,7 +111,7 @@ class _SyntheticWaveAndRangeFacts(_SyntheticFacts):
             boundary_low_init=900,
             boundary_high_now=1120,
             boundary_low_now=880,
-            resolution_type="up",
+            resolution_type="up",  # RangeLifecycleFacts 字段（方向语义）
             confirmation_pivot_extreme_price=1145,
         )
 
@@ -183,7 +183,7 @@ def _seed_range_history(driver: MALFDriver) -> None:
             boundary_low_init=900,
             boundary_high_now=1110 + index,
             boundary_low_now=890,
-            resolution_type="up",
+            breakout_direction="up",
             confirmation_pivot_extreme_price=1120 + index,
         )
         driver.lifespan_engine.record_resolved_range(lifespan)

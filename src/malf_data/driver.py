@@ -362,7 +362,7 @@ class MALFDriver:
             boundary_low_init=facts.boundary_low_init,
             boundary_high_now=facts.boundary_high_now,
             boundary_low_now=facts.boundary_low_now,
-            resolution_type=facts.resolution_type,
+            breakout_direction=facts.resolution_type,
             confirmation_pivot_extreme_price=facts.confirmation_pivot_extreme_price,
         )
 
