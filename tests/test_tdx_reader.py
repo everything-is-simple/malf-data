@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
 
-AUTHORITATIVE_TDX_FILE = Path(r"Z:\new_tdx64\vipdoc\sh\lday\sh510050.day")
+# 支持 Linux 和 Windows 路径
+if os.name == 'posix':
+    AUTHORITATIVE_TDX_FILE = Path("/sessions/ecstatic-amazing-hamilton/mnt/new_tdx64/vipdoc/sh/lday/sh510050.day")
+else:
+    AUTHORITATIVE_TDX_FILE = Path(r"Z:\new_tdx64\vipdoc\sh\lday\sh510050.day")
 
 
 def test_tdx_reader_parses_authoritative_sh510050() -> None:
