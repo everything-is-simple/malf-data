@@ -149,23 +149,6 @@ class MALFDriver:
                 wave_lifespan, ranks
             )
 
-            self._event("position.build_p1_view")
-            p1 = self.position_engine.build_p1_view(wave_lifespan)
-
-            terminated_waves = self.lifespan_engine.get_terminated_waves()
-            self._event("position.build_p2_view")
-            p2 = self.position_engine.build_p2_view(wave_lifespan, terminated_waves)
-
-            self._event("position.build_p3_view")
-            p3 = self.position_engine.build_p3_view(wave_lifespan, terminated_waves)
-
-            self._event("position.build_p4_view")
-            p4 = self.position_engine.build_p4_view(
-                wave_lifespan,
-                terminated_waves[-1] if terminated_waves else None,
-                wave_facts.current_wave_is_alive,
-            )
-
         if range_lifespan is not None and range_facts is not None:
             self._event("rank.filter_range_peer_sample")
             range_peers = self.rank_engine.filter_range_peer_sample(
@@ -182,6 +165,24 @@ class MALFDriver:
             self._event("rank.update_range_lifespan_with_ranks")
             range_lifespan = self.rank_engine.update_range_lifespan_with_ranks(
                 range_lifespan, range_ranks
+            )
+
+        if wave_lifespan is not None and wave_facts is not None:
+            self._event("position.build_p1_view")
+            p1 = self.position_engine.build_p1_view(wave_lifespan)
+
+            terminated_waves = self.lifespan_engine.get_terminated_waves()
+            self._event("position.build_p2_view")
+            p2 = self.position_engine.build_p2_view(wave_lifespan, terminated_waves)
+
+            self._event("position.build_p3_view")
+            p3 = self.position_engine.build_p3_view(wave_lifespan, terminated_waves)
+
+            self._event("position.build_p4_view")
+            p4 = self.position_engine.build_p4_view(
+                wave_lifespan,
+                terminated_waves[-1] if terminated_waves else None,
+                wave_facts.current_wave_is_alive,
             )
 
         self._event("service.build_wave_structural_snapshot")

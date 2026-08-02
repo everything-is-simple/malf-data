@@ -187,13 +187,13 @@ def test_driver_calls_range_lifespan_and_rank_when_public_facts_are_supplied() -
         "rank.filter_peer_sample",
         "rank.calculate_wave_ranks",
         "rank.update_wave_lifespan_with_ranks",
+        "rank.filter_range_peer_sample",
+        "rank.calculate_range_ranks",
+        "rank.update_range_lifespan_with_ranks",
         "position.build_p1_view",
         "position.build_p2_view",
         "position.build_p3_view",
         "position.build_p4_view",
-        "rank.filter_range_peer_sample",
-        "rank.calculate_range_ranks",
-        "rank.update_range_lifespan_with_ranks",
         "service.build_wave_structural_snapshot",
     ]
     assert snapshot.range_span_rank is not None
