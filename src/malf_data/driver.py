@@ -23,7 +23,9 @@ from malf.types import (
     RangeLifespan,
     RangeResolutionType,
     RangeSnapshot,
+    SystemState,
     WaveLifespan,
+    WaveSnapshot,
     WaveStructuralSnapshot,
 )
 
@@ -91,23 +93,116 @@ class LifecycleFactsProvider(Protocol):
         """Return a public active-range snapshot when one is available."""
 
 
-class PublicCoreOnlyLifecycleFacts:
-    """Production-safe default: do not infer unavailable lifecycle facts."""
+class CorePublicLifecycleFacts:
+    """Production default: consume public Core snapshot facts (DECISION-004 §2.6).
+
+    Reads only MALFCoreEngine's public ``CoreStateSnapshot`` fields:
+    - ``terminated_wave`` (one-shot on the break bar) -> wave facts, not alive
+    - ``active_wave`` (alive state) -> wave facts, alive
+    - ``resolved_range`` (one-shot on the resolution bar) -> range facts, record
+    - ``active_range`` (alive state) -> public range snapshot for Service
+
+    ``span_bars`` (Range) = inclusive count from birth to resolution bar
+    (t7_3 golden fixture: "2020-01-20 到 2020-01-10 共 11 根 bar（含首尾）").
+    ``RangeSnapshot`` does not carry span_bars, so this provider keeps a bar
+    counter keyed on bar_dt (idempotent per bar).
+
+    ``replacement_count`` comes from ``CoreStateSnapshot.candidate_replacement_count``
+    accumulated during transition; the resolution bar resets it to 0, so the last
+    transition value is tracked here.
+
+    ``resolution_type`` for RangeLifecycleFacts is the breakout direction
+    ("up"/"down"), derived from ``RangeSnapshot.new_wave_direction``;
+    ``RangeSnapshot.resolution_type`` is the continuation/reversal classification,
+    not the breakout direction.
+    """
+
+    def __init__(self) -> None:
+        self._bar_count = 0
+        self._last_bar_dt: str | None = None
+        self._range_birth_count: int | None = None
+        self._range_replacement_count: int = 0
+
+    def _tick(self, bar: PriceBar) -> None:
+        if bar.bar_dt != self._last_bar_dt:
+            self._bar_count += 1
+            self._last_bar_dt = bar.bar_dt
 
     def wave_facts(
         self, bar: PriceBar, core: CoreStateSnapshot
     ) -> WaveLifecycleFacts | None:
+        self._tick(bar)
+        if core.terminated_wave is not None:
+            return self._to_wave_facts(core.terminated_wave, alive=False, bar_dt=bar.bar_dt)
+        if core.active_wave is not None:
+            return self._to_wave_facts(core.active_wave, alive=True, bar_dt=bar.bar_dt)
         return None
 
     def range_facts(
         self, bar: PriceBar, core: CoreStateSnapshot
     ) -> RangeLifecycleFacts | None:
-        return None
+        self._tick(bar)
+        r = core.resolved_range
+        if r is None:
+            return None
+        # Range span_bars 含首尾（t7_3 golden fixture 口径）
+        span_bars = (
+            self._bar_count - self._range_birth_count + 1
+            if self._range_birth_count is not None
+            else 1
+        )
+        self._range_birth_count = None  # 重置，等待下一个 range 诞生
+        return RangeLifecycleFacts(
+            range_id=r.range_id,
+            range_type=r.resolution_type,
+            range_start_bar_dt=r.birth_bar_dt,
+            range_end_bar_dt=r.resolution_bar_dt,
+            span_bars=span_bars,
+            evolution_count=r.evolution_count,
+            replacement_count=self._range_replacement_count,
+            resolution_distance=r.resolution_distance,
+            boundary_high_init=r.boundary_init_high,
+            boundary_low_init=r.boundary_init_low,
+            boundary_high_now=r.boundary_now_high,
+            boundary_low_now=r.boundary_now_low,
+            resolution_type=(
+                "up" if r.new_wave_direction == Direction.UP else "down"
+            ),
+            confirmation_pivot_extreme_price=r.confirmation_pivot_extreme_price,
+            record_resolved=True,
+        )
 
     def active_range(
         self, bar: PriceBar, core: CoreStateSnapshot
     ) -> RangeSnapshot | None:
-        return None
+        self._tick(bar)
+        if core.active_range is not None:
+            if self._range_birth_count is None:
+                self._range_birth_count = self._bar_count
+            # transition 期间累计 candidate 替换；resolution bar 会清零，用最后一根 transition 的值
+            if core.system_state == SystemState.TRANSITION:
+                self._range_replacement_count = core.candidate_replacement_count
+        return core.active_range
+
+    def _to_wave_facts(
+        self, w: WaveSnapshot, *, alive: bool, bar_dt: str
+    ) -> WaveLifecycleFacts:
+        return WaveLifecycleFacts(
+            wave_id=w.wave_id,
+            direction=w.direction,
+            wave_start_bar_dt=w.start_bar_dt,
+            wave_start_price=w.start_price,
+            wave_end_bar_dt=w.break_bar_dt if not alive else bar_dt,
+            wave_end_price=w.wave_end_price,
+            span_bars=w.bar_count,
+            primitive_count=w.primitive_count,
+            pivot_count=w.pivot_count,
+            new_count=w.new_count,
+            no_new_span=w.no_new_span,
+            first_pivot_price=w.first_pivot_price,
+            guard_price=w.guard_price,
+            current_wave_is_alive=alive,
+        )
 
 
 class MALFDriver:
@@ -125,7 +220,7 @@ class MALFDriver:
         self.lifespan_engine = LifespanEngine()
         self.rank_engine = RankEngine()
         self.position_engine = StructuralPositionEngine()
-        self.lifecycle_facts = lifecycle_facts or PublicCoreOnlyLifecycleFacts()
+        self.lifecycle_facts = lifecycle_facts or CorePublicLifecycleFacts()
         self.event_sink = event_sink
         self.data_stale = data_stale
 
@@ -189,16 +284,23 @@ class MALFDriver:
             p1 = self.position_engine.build_p1_view(wave_lifespan)
 
             terminated_waves = self.lifespan_engine.get_terminated_waves()
+            # P2/P3 约定 terminated_waves 按时间倒序（W-1 在前，见 t8_2 fixture），
+            # 而 get_terminated_waves() 返回 append 正序（最早在前）——必须反转再传，
+            # 否则 [:3] 取到最早的 3 个波（真实数据上其 rank 恒 None，P2/P3 恒 None）。
             self._event("position.build_p2_view")
-            p2 = self.position_engine.build_p2_view(wave_lifespan, terminated_waves)
+            p2 = self.position_engine.build_p2_view(
+                wave_lifespan, list(reversed(terminated_waves))
+            )
 
             self._event("position.build_p3_view")
-            p3 = self.position_engine.build_p3_view(wave_lifespan, terminated_waves)
+            p3 = self.position_engine.build_p3_view(
+                wave_lifespan, list(reversed(terminated_waves))
+            )
 
             self._event("position.build_p4_view")
             p4 = self.position_engine.build_p4_view(
                 wave_lifespan,
-                terminated_waves[-1] if terminated_waves else None,
+                terminated_waves[-1] if terminated_waves else None,  # 正序最后一个 = 最近 W-1
                 wave_facts.current_wave_is_alive,
             )
 
