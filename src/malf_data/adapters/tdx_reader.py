@@ -32,10 +32,17 @@ def read_tdx_day(file_path: Path) -> list[PriceBar]:
 
     bars: list[PriceBar] = []
     symbol = file_path.stem
+    previous_bar_dt: str | None = None
     for offset in range(0, len(raw), _RECORD.size):
         date, open_price, high, low, close, _amount, _volume, _reserved = _RECORD.unpack_from(raw, offset)
         bar_dt = f"{date:08d}"
         _validate_record(file_path, offset // _RECORD.size, bar_dt, open_price, high, low, close)
+        if previous_bar_dt is not None and bar_dt <= previous_bar_dt:
+            raise TDXDataError(
+                f"TDX input {file_path} has bar_dt values that are not strictly increasing"
+                f" at record {offset // _RECORD.size}: {previous_bar_dt} -> {bar_dt}"
+            )
+        previous_bar_dt = bar_dt
         bars.append(
             PriceBar(
                 symbol=symbol,

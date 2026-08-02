@@ -81,6 +81,12 @@ class DuckDBAdapter:
         self.connection.execute(_CREATE_TABLE_SQL)
         self.connection.commit()
 
+    def __enter__(self) -> "DuckDBAdapter":
+        return self
+
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
+        self.close()
+
     def close(self) -> None:
         """Close the owned DuckDB connection."""
         self.connection.close()
@@ -111,5 +117,6 @@ def _serialize_value(name: str, value: object) -> object:
     if name in {"rule_versions", "reason_codes"}:
         return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
     return value
+
 
 

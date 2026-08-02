@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import struct
 
 import pytest
+
+
+_RECORD = struct.Struct("<5If2I")
+
+
+def _packed_record(date: int, close: int = 1000) -> bytes:
+    return _RECORD.pack(date, close - 2, close + 3, close - 4, close, 1.0, 100, 0)
 
 
 # 支持 Linux 和 Windows 路径
@@ -37,3 +45,26 @@ def test_tdx_reader_rejects_truncated_record_for_entire_symbol(tmp_path: Path) -
 
     with pytest.raises(TDXDataError, match="32-byte"):
         read_tdx_day(malformed)
+
+
+
+def test_tdx_reader_rejects_duplicate_bar_dt_for_entire_symbol(tmp_path: Path) -> None:
+    """Duplicate dates are structural input defects and must reject the symbol."""
+    from malf_data.adapters.tdx_reader import TDXDataError, read_tdx_day
+
+    duplicated = tmp_path / "sh999999.day"
+    duplicated.write_bytes(_packed_record(20260102) + _packed_record(20260102))
+
+    with pytest.raises(TDXDataError, match="strictly increasing"):
+        read_tdx_day(duplicated)
+
+
+def test_tdx_reader_rejects_descending_bar_dt_for_entire_symbol(tmp_path: Path) -> None:
+    """Out-of-order dates are not sorted or skipped by the strict reader."""
+    from malf_data.adapters.tdx_reader import TDXDataError, read_tdx_day
+
+    descending = tmp_path / "sh999999.day"
+    descending.write_bytes(_packed_record(20260103) + _packed_record(20260102))
+
+    with pytest.raises(TDXDataError, match="strictly increasing"):
+        read_tdx_day(descending)
