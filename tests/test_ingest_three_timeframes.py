@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import struct
 
 import pytest
@@ -11,8 +12,12 @@ from malf.types import PriceBar
 
 from malf_data.adapters.duckdb_adapter import DuckDBAdapter
 from malf_data.adapters.tdx_reader import read_tdx_day
-from malf_data.aggregate import aggregate_to_week
-from malf_data.ingest import build_snapshots, ingest_symbol
+from malf_data.aggregate import (
+    MONTH_RULE_VERSION,
+    WEEK_RULE_VERSION,
+    aggregate_to_week,
+)
+from malf_data.ingest import build_snapshots, ingest_bars, ingest_symbol
 
 
 _RECORD = struct.Struct("<5If2I")
@@ -120,6 +125,48 @@ def test_week_snapshots_and_lineage_hash_are_deterministic(tmp_path: Path) -> No
     assert first == second
     assert first[0].lineage_hash == second[0].lineage_hash
     assert all(snapshot.timeframe == "week" for snapshot in first)
+    assert all(
+        snapshot.rule_versions["bar_aggregation"] == WEEK_RULE_VERSION
+        for snapshot in first
+    )
+
+
+def test_persisted_aggregated_snapshots_record_aggregation_rule_version(tmp_path: Path) -> None:
+    symbol = "sh999994"
+    tdx_root = tmp_path / "tdx"
+    db_path = tmp_path / "riskbench.duckdb"
+    _write_day_file(tdx_root, symbol)
+
+    ingest_symbol(symbol, timeframe="week", tdx_root=tdx_root, db_path=db_path)
+    ingest_symbol(symbol, timeframe="month", tdx_root=tdx_root, db_path=db_path)
+
+    with DuckDBAdapter(db_path) as adapter:
+        rows = adapter.connection.execute(
+            "SELECT timeframe, rule_versions FROM snapshots "
+            "WHERE timeframe IN ('week', 'month') GROUP BY timeframe, rule_versions "
+            "ORDER BY timeframe"
+        ).fetchall()
+
+    versions = {timeframe: json.loads(str(rule_versions)) for timeframe, rule_versions in rows}
+    assert versions["week"]["bar_aggregation"] == WEEK_RULE_VERSION
+    assert versions["month"]["bar_aggregation"] == MONTH_RULE_VERSION
+
+
+def test_ingest_bars_rejects_timeframe_mismatch(tmp_path: Path) -> None:
+    symbol = "sh999993"
+    db_path = tmp_path / "riskbench.duckdb"
+    day_bar = PriceBar(symbol, "day", "20250602", 1000, 1003, 996, 1000)
+
+    with pytest.raises(ValueError, match="bar timeframe"):
+        ingest_bars(symbol, timeframe="week", bars=[day_bar], db_path=db_path)
+
+
+def test_ingest_bars_rejects_symbol_mismatch(tmp_path: Path) -> None:
+    db_path = tmp_path / "riskbench.duckdb"
+    day_bar = PriceBar("sz999993", "day", "20250602", 1000, 1003, 996, 1000)
+
+    with pytest.raises(ValueError, match="bar symbol"):
+        ingest_bars("sh999993", timeframe="day", bars=[day_bar], db_path=db_path)
 
 
 def test_ingest_rejects_unsupported_timeframe(tmp_path: Path) -> None:

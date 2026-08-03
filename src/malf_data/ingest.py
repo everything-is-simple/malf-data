@@ -12,11 +12,20 @@ from malf.types import PriceBar, WaveStructuralSnapshot
 
 from malf_data.adapters.duckdb_adapter import DuckDBAdapter
 from malf_data.adapters.tdx_reader import read_tdx_day
-from malf_data.aggregate import aggregate_to_month, aggregate_to_week
+from malf_data.aggregate import (
+    MONTH_RULE_VERSION,
+    WEEK_RULE_VERSION,
+    aggregate_to_month,
+    aggregate_to_week,
+)
 from malf_data.driver import ADAPTER_VERSION, MALFDriver
 
 
 _SUPPORTED_TIMEFRAMES: tuple[str, ...] = ("day", "week", "month")
+_AGGREGATION_RULE_VERSION_BY_TIMEFRAME: dict[str, str] = {
+    "week": WEEK_RULE_VERSION,
+    "month": MONTH_RULE_VERSION,
+}
 
 
 @dataclass(frozen=True)
@@ -35,11 +44,46 @@ def build_snapshots(
     malf_k: int = 2,
     data_stale: bool = True,
 ) -> list[WaveStructuralSnapshot]:
-    """Run the explicit MALF driver and attach one deterministic run hash."""
+    """Run one homogeneous MALF series and attach deterministic audit metadata."""
+    prepared = list(bars)
+    _validate_homogeneous_series(prepared)
+
     driver = MALFDriver(malf_k=malf_k, data_stale=data_stale)
-    unhashed = [driver.on_bar(bar) for bar in bars]
+    unhashed = [driver.on_bar(bar) for bar in prepared]
+    aggregation_rule_version = (
+        _AGGREGATION_RULE_VERSION_BY_TIMEFRAME.get(prepared[0].timeframe)
+        if prepared
+        else None
+    )
+    if aggregation_rule_version is not None:
+        unhashed = [
+            replace(
+                snapshot,
+                rule_versions={
+                    **snapshot.rule_versions,
+                    "bar_aggregation": aggregation_rule_version,
+                },
+            )
+            for snapshot in unhashed
+        ]
+
     lineage_hash = calculate_lineage_hash(unhashed)
     return [replace(snapshot, lineage_hash=lineage_hash) for snapshot in unhashed]
+
+
+def _validate_homogeneous_series(bars: list[PriceBar]) -> None:
+    """Reject mixed identity/timeframe input before it reaches a stateful driver."""
+    if not bars:
+        return
+    symbols = {bar.symbol for bar in bars}
+    if len(symbols) != 1:
+        raise ValueError("snapshot input bars must have the same symbol")
+    timeframes = {bar.timeframe for bar in bars}
+    if len(timeframes) != 1:
+        raise ValueError("snapshot input bars must have the same timeframe")
+    for previous, current in zip(bars, bars[1:]):
+        if not previous.bar_dt < current.bar_dt:
+            raise ValueError("snapshot input bar_dt must be strictly increasing")
 
 
 def calculate_lineage_hash(snapshots: Iterable[WaveStructuralSnapshot]) -> str:
@@ -75,7 +119,18 @@ def ingest_bars(
     run preserves stateful engine semantics; only already committed bars are
     excluded from DuckDB writes (partitioned by symbol + timeframe).
     """
-    snapshots = build_snapshots(bars, malf_k=malf_k, data_stale=data_stale)
+    if timeframe not in _SUPPORTED_TIMEFRAMES:
+        raise ValueError("timeframe must be one of 'day', 'week', 'month'")
+
+    prepared = list(bars)
+    _validate_homogeneous_series(prepared)
+    for bar in prepared:
+        if bar.symbol != symbol:
+            raise ValueError("bar symbol must match ingest symbol")
+        if bar.timeframe != timeframe:
+            raise ValueError("bar timeframe must match ingest timeframe")
+
+    snapshots = build_snapshots(prepared, malf_k=malf_k, data_stale=data_stale)
 
     inserted_rows = 0
     with DuckDBAdapter(db_path) as adapter:

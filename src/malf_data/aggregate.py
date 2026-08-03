@@ -32,6 +32,9 @@ def _validate_input(daily: list[PriceBar]) -> None:
     for bar in daily:
         if bar.timeframe != "day":
             raise ValueError("aggregate input bars must have timeframe 'day'")
+    symbols = {bar.symbol for bar in daily}
+    if len(symbols) > 1:
+        raise ValueError("aggregate input bars must have the same symbol")
     for prev, curr in zip(daily, daily[1:]):
         if not prev.bar_dt < curr.bar_dt:
             raise ValueError("aggregate input bar_dt must be strictly increasing")

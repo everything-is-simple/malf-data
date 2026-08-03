@@ -152,3 +152,11 @@ class TestAggregateContracts:
         month = aggregate_to_month(days)
         assert week[0].symbol == "sh510300" and week[0].timeframe == "week"
         assert month[0].symbol == "sh510300" and month[0].timeframe == "month"
+
+    def test_mixed_symbols_raise(self) -> None:
+        days = [
+            _bar("20250818", 100, 105, 98, 102, symbol="sh510300"),
+            _bar("20250819", 103, 106, 99, 104, symbol="sz159915"),
+        ]
+        with pytest.raises(ValueError, match="same symbol"):
+            aggregate_to_week(days)
