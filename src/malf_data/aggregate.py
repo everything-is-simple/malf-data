@@ -5,10 +5,10 @@
   high/low = 周内极值；close = 周内最后交易日收盘；
 - 月线：bar_dt = 该月最后交易日；open = 月初首个交易日开盘；
   high/low = 月内极值；close = 月末最后交易日收盘；
-- 规则版本：`malf-week-from-day-v1` / `malf-month-from-day-v1`（仅文档与审计标识，不嵌入快照）。
+- 规则版本：`malf-week-from-day-v1` / `malf-month-from-day-v1`（常量定义处；实际嵌入快照由 ingest 层在计算 lineage_hash 前写入 `rule_versions`，见 `ingest.build_snapshots`）。
 - 纯函数、确定性：相同输入 → 相同输出；输入必须按 bar_dt 严格递增且全部为 day timeframe。
 
-本模块不连接 DuckDB、不读文件、不调用 MALF 引擎；聚合在源整数价格域上完成，不做 /1000、round 或 binary float。
+本模块不连接 DuckDB、不读文件、不调用 MALF 引擎，自身不写快照；聚合在源整数价格域上完成，不做 /1000、round 或 binary float。
 """
 
 from __future__ import annotations
