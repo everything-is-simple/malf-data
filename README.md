@@ -2,9 +2,9 @@
 
 T02 upstream data pipeline component for **AI MALF RiskBench**.
 
-## 状态（2026-08-02）
+## 状态（2026-08-04 更新）
 
-✅ **T02 已完成并解除阻塞**（DECISION-004 公开 lifecycle facts 合同）。测试 **17 passed**。
+✅ **T02 已完成并解除阻塞**（DECISION-004 公开 lifecycle facts 合同）+ **B 三周期聚合已完成**（DECISION-005，day→week/month）。测试 **36 passed**（2026-08-04 实跑；历史 17 passed 为 T02 解除阻塞时数值）。
 
 ## 职责
 
@@ -35,5 +35,5 @@ result = ingest_symbol(
 ## 测试
 
 ```powershell
-python -m pytest tests -q   # 预期 17 passed
+python -m pytest tests -q   # 预期 36 passed（2026-08-04 实跑）
 ```
