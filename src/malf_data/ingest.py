@@ -38,6 +38,18 @@ class IngestResult:
     lineage_hash: str
 
 
+def apply_as_of_cutoff(bars: Iterable[PriceBar], as_of_date: str | None) -> list[PriceBar]:
+    """D3（2026-08-05）：按完整交易日 as_of_date 截断 bar 序列。
+
+    - day 输入进入引擎前调用；week/month 聚合必须基于截断后的 day 序列；
+    - as_of_date=None 时原样返回（兼容非 D3 调用）；
+    - 返回序列保持原时间顺序。
+    """
+    if as_of_date is None:
+        return list(bars)
+    return [b for b in bars if b.bar_dt <= as_of_date]
+
+
 def build_snapshots(
     bars: Iterable[PriceBar],
     *,
@@ -176,17 +188,22 @@ def ingest_symbol(
     db_path: Path,
     malf_k: int = 2,
     data_stale: bool = True,
+    as_of_date: str | None = None,
 ) -> IngestResult:
     """Read one authoritative TDX symbol and resume durable snapshot writes.
 
     week/month 输入来自 `aggregate.py` 的 day 聚合产物（trd.md §5.4.3 口径）；
     日/周/月各自独立跑 MALF（不混池 rank），快照以 timeframe 字段区分。
+
+    D3（2026-08-05）：as_of_date 为完整交易日截止——在 day 输入进入引擎/聚合前
+    截断，week/month 从截断后的 day 序列重聚合；生产模式要求显式传入，不依赖机器系统日期。
     """
     if timeframe not in _SUPPORTED_TIMEFRAMES:
         raise ValueError("timeframe must be one of 'day', 'week', 'month'")
 
     file_path = tdx_root / "vipdoc" / symbol[:2] / "lday" / f"{symbol}.day"
     daily = read_tdx_day(file_path)
+    daily = apply_as_of_cutoff(daily, as_of_date)  # D3：完整交易日截断
     if timeframe == "week":
         bars = aggregate_to_week(daily)
     elif timeframe == "month":
