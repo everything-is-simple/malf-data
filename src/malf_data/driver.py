@@ -396,10 +396,11 @@ class MALFDriver:
 
 
 def _rule_versions(core: CoreStateSnapshot) -> dict[str, str]:
+    # T9.11（2026-08-05）：键名对齐权威 Service §5（pivot_rule/price_domain/adapter/core_version/...）
     return {
         "adapter": ADAPTER_VERSION,
-        "core": core.core_rule_version,
-        "pivot": core.pivot_detection_rule_version,
-        "price_policy": core.price_policy,
+        "core_version": core.core_rule_version,
+        "pivot_rule": core.pivot_detection_rule_version,
+        "price_domain": core.price_policy,
         "schema": core.schema_version,
     }

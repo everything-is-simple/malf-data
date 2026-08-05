@@ -56,7 +56,8 @@ def test_driver_composes_real_core_and_service_into_44_field_snapshots() -> None
     assert snapshots[0].usage == "research_only"
     assert snapshots[0].freshness == "stale_research_only"
     assert snapshots[0].rule_versions["adapter"] == "malf-v2.0-etf-tick-v0.1"
-    assert snapshots[0].rule_versions["price_policy"] == "int_fixed"
+    # T9.11 对齐权威 Service §5：键名 price_domain（原 price_policy）
+    assert snapshots[0].rule_versions["price_domain"] == "source_integer_fixed_point"
     assert all(snapshot.lineage_hash == snapshots[0].lineage_hash for snapshot in snapshots)
 
 
