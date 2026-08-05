@@ -116,8 +116,14 @@ def ingest_bars(
     """Run the deterministic MALF driver over prepared bars and resume durable writes.
 
     The complete input prefix is replayed through Core on every run so a resumed
-    run preserves stateful engine semantics; only already committed bars are
-    excluded from DuckDB writes (partitioned by symbol + timeframe).
+    run preserves stateful engine semantics.
+
+    D1 修复（2026-08-05，生产写入复核发现）：以"最新行 lineage == 当前系列 lineage"
+    判定系列是否变化——无变化 → 幂等跳过；有变化 →
+      - day：追加新 bar（bar_dt > 已提交最大 bar_dt）+ 刷新分区内全部既有行 lineage；
+      - week/month：聚合派生在扩展后会重导旧的部分桶（旧桶 bar_dt 与新桶不同，
+        无法按 bar_dt 去重）→ 全量重建（删除分区 + 全量插入），收敛到全新构建。
+    不变量：增量后每 (symbol, timeframe) 行集合 == 全新构建，且单一 lineage。
     """
     if timeframe not in _SUPPORTED_TIMEFRAMES:
         raise ValueError("timeframe must be one of 'day', 'week', 'month'")
@@ -131,21 +137,34 @@ def ingest_bars(
             raise ValueError("bar timeframe must match ingest timeframe")
 
     snapshots = build_snapshots(prepared, malf_k=malf_k, data_stale=data_stale)
+    new_hash = snapshots[0].lineage_hash if snapshots else calculate_lineage_hash([])
 
     inserted_rows = 0
     with DuckDBAdapter(db_path) as adapter:
-        last_bar_dt = adapter.get_last_bar_dt(symbol, timeframe)
-        for snapshot in snapshots:
-            if last_bar_dt is not None and snapshot.bar_dt <= last_bar_dt:
-                continue
-            adapter.insert_snapshot(snapshot)
-            inserted_rows += 1
+        last_lineage = adapter.get_last_lineage(symbol, timeframe)
+        if last_lineage is not None and last_lineage == new_hash:
+            # 系列未变化：幂等跳过（inserted_rows == 0）
+            pass
+        elif timeframe == "day":
+            last_bar_dt = adapter.get_last_bar_dt(symbol, timeframe)
+            for snapshot in snapshots:
+                if last_bar_dt is not None and snapshot.bar_dt <= last_bar_dt:
+                    continue
+                adapter.insert_snapshot(snapshot)
+                inserted_rows += 1
+            adapter.refresh_lineage(symbol, timeframe, new_hash)
+        else:
+            # week/month：聚合派生，删除分区后全量插入（收敛到全新构建）
+            adapter.delete_symbol_timeframe(symbol, timeframe)
+            for snapshot in snapshots:
+                adapter.insert_snapshot(snapshot)
+                inserted_rows += 1
 
     return IngestResult(
         symbol=symbol,
         timeframe=timeframe,
         inserted_rows=inserted_rows,
-        lineage_hash=snapshots[0].lineage_hash if snapshots else calculate_lineage_hash([]),
+        lineage_hash=new_hash,
     )
 
 

@@ -112,6 +112,39 @@ class DuckDBAdapter:
         ).fetchone()
         return row[0] if row is not None else None
 
+    def get_last_lineage(self, symbol: str, timeframe: str) -> str | None:
+        """Return the lineage of the most recent row of a partition（系列当前版本标识）。
+
+        D1 修复（2026-08-05）：增量 ingest 以"最新行 lineage"作为系列是否变化的判据——
+        相同输入 → 相同 lineage → 幂等跳过；输入变化 → lineage 变化 → 追加/重建。
+        """
+        row = self.connection.execute(
+            """
+            SELECT "lineage_hash"
+            FROM snapshots
+            WHERE "symbol" = ? AND "timeframe" = ?
+            ORDER BY "bar_index" DESC LIMIT 1
+            """,
+            [symbol, timeframe],
+        ).fetchone()
+        return row[0] if row is not None else None
+
+    def delete_symbol_timeframe(self, symbol: str, timeframe: str) -> None:
+        """删除一个分区的全部行（week/month 聚合重建用，D1 修复）。"""
+        self.connection.execute(
+            'DELETE FROM snapshots WHERE "symbol" = ? AND "timeframe" = ?',
+            [symbol, timeframe],
+        )
+        self.connection.commit()
+
+    def refresh_lineage(self, symbol: str, timeframe: str, new_hash: str) -> None:
+        """把分区内全部既有行的 lineage_hash 刷新为当前系列哈希（day 增量用，D1 修复）。"""
+        self.connection.execute(
+            'UPDATE snapshots SET "lineage_hash" = ? WHERE "symbol" = ? AND "timeframe" = ?',
+            [new_hash, symbol, timeframe],
+        )
+        self.connection.commit()
+
 
 def _serialize_value(name: str, value: object) -> object:
     if name in {"rule_versions", "reason_codes"}:
