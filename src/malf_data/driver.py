@@ -16,6 +16,7 @@ from malf.lifespan_engine import LifespanEngine
 from malf.rank_engine import RankEngine
 from malf.service_engine import build_wave_structural_snapshot
 from malf.structural_position_engine import StructuralPositionEngine
+from malf.version import service_rule_versions
 from malf.types import (
     CoreStateSnapshot,
     Direction,
@@ -396,11 +397,10 @@ class MALFDriver:
 
 
 def _rule_versions(core: CoreStateSnapshot) -> dict[str, str]:
-    # T9.11（2026-08-05）：键名对齐权威 Service §5（pivot_rule/price_domain/adapter/core_version/...）
-    return {
-        "adapter": ADAPTER_VERSION,
-        "core_version": core.core_rule_version,
-        "pivot_rule": core.pivot_detection_rule_version,
-        "price_domain": core.price_policy,
-        "schema": core.schema_version,
-    }
+    """返回发布快照的完整七键版本合同。
+
+    ``core`` 保留在函数签名中以维持 driver 调用边界；对外版本值由集中合同
+    决定，不能混入内部实现版本或 schema 版本。
+    """
+    _ = core
+    return service_rule_versions()

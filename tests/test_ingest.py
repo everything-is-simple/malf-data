@@ -56,8 +56,16 @@ def test_driver_composes_real_core_and_service_into_44_field_snapshots() -> None
     assert snapshots[0].usage == "research_only"
     assert snapshots[0].freshness == "stale_research_only"
     assert snapshots[0].rule_versions["adapter"] == "malf-v2.0-etf-tick-v0.1"
-    # T9.11 对齐权威 Service §5：键名 price_domain（原 price_policy）
-    assert snapshots[0].rule_versions["price_domain"] == "source_integer_fixed_point"
+    # T9.13：Service §5 七键齐全；adapter/price_domain 使用 AGENTS.md §6 的 RiskBench 变体。
+    assert snapshots[0].rule_versions == {
+        "pivot_rule": "fractal_k2_v1.0",
+        "price_domain": "source_integer_fixed_point-v0.1",
+        "adapter": "malf-v2.0-etf-tick-v0.1",
+        "core_version": "v2.1",
+        "range_version": "v2.1",
+        "lifespan_version": "v2.1",
+        "structural_position_version": "v2.1",
+    }
     assert all(snapshot.lineage_hash == snapshots[0].lineage_hash for snapshot in snapshots)
 
 
